@@ -64,7 +64,21 @@ All commands use `canvas.sh` in this skill's directory.
 
 # Full digest: courses + upcoming + overdue
 ./canvas.sh summary <student_key>
+
+# Weighted priority list — what to work on first
+./canvas.sh priorities <student_key> [--limit N] [--all]
 ```
+
+## Priority Algorithm
+
+The `priorities` command ranks assignments by grade impact:
+
+1. **Effective score** = `points_possible × (group_weight / 100)` for weighted courses, or raw points otherwise
+2. **Upcoming bonus** = 1.5× multiplier (full credit still available)
+3. **Overdue** = no multiplier (partial credit)
+4. Sorted by priority score descending
+
+Non-academic courses (Advisory, Study Hall, theater) are filtered via `skipCourses` in config.
 
 `<student_key>` matches a key in `canvas-config.json` (e.g., `willa`, `clara`).
 
@@ -76,6 +90,7 @@ The config file is at `WORKSPACE/canvas-config.json` where WORKSPACE is the Open
 
 ```json
 {
+  "skipCourses": ["Advisory", "Study Hall"],
   "students": {
     "<key>": {
       "name": "string - display name",

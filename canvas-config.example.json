@@ -1,4 +1,5 @@
 {
+  "skipCourses": ["Advisory", "Study Hall"],
   "students": {
     "student1": {
       "name": "Student Name",
