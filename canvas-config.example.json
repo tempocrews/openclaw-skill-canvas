@@ -1,0 +1,10 @@
+{
+  "students": {
+    "student1": {
+      "name": "Student Name",
+      "domain": "school.instructure.com",
+      "userId": 12345,
+      "token": "YOUR_CANVAS_API_TOKEN"
+    }
+  }
+}
