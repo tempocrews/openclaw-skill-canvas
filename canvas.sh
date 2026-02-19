@@ -260,6 +260,89 @@ cmd_summary() {
   cmd_assignments "$student" --days 7
 }
 
+cmd_recent() {
+  local student="$1"
+  shift
+  local hours=4
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --hours) hours="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  local name
+  name=$(get_student_field "$student" "name")
+  local since_iso
+  since_iso=$(date -u -d "-${hours} hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-${hours}H +%Y-%m-%dT%H:%M:%SZ)
+
+  echo "🕐 Recent activity for $name (last ${hours}h)"
+  echo "═══════════════════════════════════════"
+
+  local courses_json
+  courses_json=$(canvas_api "$student" "/courses?enrollment_state=active")
+
+  local all_submissions="[]"
+
+  while IFS='|' read -r course_id course_name; do
+    [[ -z "$course_id" ]] && continue
+    if should_skip_course "$course_name"; then
+      continue
+    fi
+
+    local assignments_json
+    assignments_json=$(canvas_api "$student" "/courses/${course_id}/assignments?include[]=submission")
+
+    local recent
+    recent=$(echo "$assignments_json" | jq -c --arg since "$since_iso" --arg course "$course_name" '
+      [.[] |
+        select(.submission.submitted_at != null) |
+        select(.submission.submitted_at >= $since) |
+        {
+          course: $course,
+          name: .name,
+          points: .points_possible,
+          submitted_at: .submission.submitted_at,
+          score: .submission.score,
+          grade: .submission.grade,
+          graded: (.submission.workflow_state == "graded"),
+          late: .submission.late
+        }
+      ]')
+
+    if [[ "$recent" != "[]" && "$recent" != "null" && -n "$recent" ]]; then
+      all_submissions=$(echo "$all_submissions" "$recent" | jq -s '.[0] + .[1]')
+    fi
+
+  done < <(echo "$courses_json" | jq -r '
+    .[] | select(.workflow_state == "available") | "\(.id)|\(.name)"
+  ')
+
+  local count
+  count=$(echo "$all_submissions" | jq 'length')
+
+  echo ""
+
+  if [[ "$count" -eq 0 ]]; then
+    echo "No submissions in the last ${hours} hours."
+    return
+  fi
+
+  echo "$all_submissions" | jq -r '
+    sort_by(.submitted_at) | reverse |
+    .[] |
+    "✅ \(.course) — \(.name)" +
+    "\n   Submitted: \(.submitted_at[:16] | gsub("T"; " ")) UTC" +
+    (if .late then " (late)" else "" end) +
+    (if .graded then " · Score: \(.score)/\(.points)" else " · Not yet graded" end) +
+    "\n"
+  '
+
+  echo "───────────────────────────────────────"
+  echo "📊 ${count} submission(s) in the last ${hours}h"
+}
+
 cmd_priorities() {
   local student="$1"
   shift
@@ -438,6 +521,11 @@ case "$COMMAND" in
     shift 2
     cmd_priorities "$STUDENT" "$@"
     ;;
+  recent)
+    [[ -z "$STUDENT" ]] && { echo "Usage: canvas.sh recent <student> [--hours N]"; exit 1; }
+    shift 2
+    cmd_recent "$STUDENT" "$@"
+    ;;
   help|--help|-h)
     echo "Canvas LMS CLI — Query assignments, grades, and courses"
     echo ""
@@ -450,6 +538,7 @@ case "$COMMAND" in
     echo "  grades       Current grades"
     echo "  summary      Full digest (grades + overdue + upcoming)"
     echo "  priorities   Weighted priority list (--limit N, --all)"
+    echo "  recent       Recent submissions (--hours N, default 4)"
     echo ""
     echo "Student keys are defined in canvas-config.json"
     ;;
