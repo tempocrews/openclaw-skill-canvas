@@ -454,20 +454,36 @@ cmd_priorities() {
     return
   fi
 
+  # Filter out ancient overdue (older than 60 days by default) unless --all
+  if [[ $show_all -eq 0 ]]; then
+    local cutoff_iso
+    cutoff_iso=$(date -u -d "-60 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-60d +%Y-%m-%dT%H:%M:%SZ)
+    all_items=$(echo "$all_items" | jq --arg cutoff "$cutoff_iso" '
+      [.[] | select(.status == "upcoming" or .due_at >= $cutoff)]
+    ')
+    count=$(echo "$all_items" | jq 'length')
+  fi
+
   echo ""
 
-  echo "$all_items" | jq -r --argjson limit "$limit" --arg now "$now_iso" '
-    sort_by(-.score) |
+  # Sort by score desc, then by due date asc (soonest first as tiebreaker)
+  echo "$all_items" | jq -r --argjson limit "$limit" '
+    sort_by([-.score, .due_at]) |
     to_entries |
     .[:$limit] |
     .[] |
-    "\(.key + 1)|\(.value.course)|\(.value.name)|\(.value.points)|\(.value.due_at[:10])|\(.value.status)|\(.value.score)|\(.value.group_weight)|\(.value.weighted)"
-  ' | while IFS='|' read -r rank course aname points due status score gw weighted; do
+    "\(.key + 1)|\(.value.course)|\(.value.name)|\(.value.points)|\(.value.due_at)|\(.value.status)|\(.value.score)|\(.value.group_weight)|\(.value.weighted)"
+  ' | while IFS='|' read -r rank course aname points due_full status score gw weighted; do
+    # Format date with day of week
+    local due_date="${due_full:0:10}"
+    local friendly_date
+    friendly_date=$(date -d "$due_date" "+%a %-m/%-d" 2>/dev/null || date -j -f "%Y-%m-%d" "$due_date" "+%a %-m/%-d" 2>/dev/null || echo "$due_date")
+
     local status_str
     if [[ "$status" == "upcoming" ]]; then
-      status_str="📅 DUE $due"
+      status_str="📅 DUE $friendly_date"
     else
-      status_str="⚠️  OVERDUE (was due $due)"
+      status_str="⚠️  OVERDUE (was due $friendly_date)"
     fi
 
     local weight_str=""
@@ -487,6 +503,9 @@ cmd_priorities() {
 
   echo "───────────────────────────────────────"
   echo "📊 ${total_upcoming} upcoming · ${total_overdue} overdue · showing top ${limit}"
+  if [[ $show_all -eq 0 ]]; then
+    echo "💡 Overdue items older than 60 days hidden (use --all to include)"
+  fi
 }
 
 # --- Main ---
